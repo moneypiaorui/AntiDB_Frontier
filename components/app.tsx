@@ -1,15 +1,15 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback, SetStateAction } from 'react'
-import { Filter, Home, User, Settings, Star, Clock, ChevronRight, Search, X, ArrowLeft, Heart, Camera, Upload } from 'lucide-react'
-import { sha256 } from 'js-sha256'
+import { Filter, Home, User, Settings, Star, Clock, ChevronRight, Search, X, ArrowLeft, Heart, Camera, Upload, RefreshCw } from 'lucide-react'
+// import { sha256 } from 'js-sha256'
 import axios from 'axios';
-import { headers } from 'next/headers';
+// import { headers } from 'next/headers';
 import { debounce } from 'lodash'; // 需要安装 lodash 库
 
 // 创建一个 axios 实例
 const api = axios.create({
-  baseURL: 'http://localhost:3000/api'
+  baseURL: '/api'
 });
 
 // 添加请求拦截器
@@ -59,11 +59,39 @@ type Params = {
   limit: number;
 };
 
-// 在文件顶部添加新的类型定义
-type PageStack = {
-  database: string[];
-  identify: string[];
-  profile: string[];
+// 修改这个函数
+const getProxiedImageUrl = (url: string, size: 'thumbnail' | 'small' | 'medium' | 'large' | 'original' = 'medium') => {
+  if (url.startsWith('https://res.cloudinary.com/')) {
+    // 如果是Cloudinary的URL，直接使用Cloudinary的转换功能
+    const parts = url.split('/');
+    const uploadIndex = parts.indexOf('upload');
+    if (uploadIndex !== -1) {
+      let transformations = '';
+      switch (size) {
+        case 'thumbnail':
+          transformations = 'w_100,h_100,c_fill,f_auto,q_auto';
+          break;
+        case 'small':
+          transformations = 'w_200,h_200,c_fill,f_auto,q_auto';
+          break;
+        case 'medium':
+          transformations = 'w_400,h_400,c_fill,f_auto,q_auto';
+          break;
+        case 'large':
+          transformations = 'w_800,h_800,c_fill,f_auto,q_auto';
+          break;
+        case 'original':
+          // 不进行任何转换
+          return url;
+      }
+      parts.splice(uploadIndex + 1, 0, transformations);
+      return parts.join('/');
+    }
+  } else if (url.startsWith('http://')) {
+    // 对于非Cloudinary的URL，仍然使用代理API
+    return `/api/proxy/image?url=${encodeURIComponent(url)}`;
+  }
+  return url;
 };
 
 // Header Component
@@ -74,7 +102,7 @@ const Header = ({ isLoggedIn, onLoginClick, showBackButton = false, onBackClick,
   onBackClick?: () => void;
   title?: string;
 }) => (
-  <header className="flex justify-between items-center p-4 bg-white border-b border-gray-200">
+  <header className="fixed top-0 left-0 right-0 z-40 flex justify-between items-center p-4 bg-white border-b border-gray-200">
     {showBackButton ? (
       <button onClick={onBackClick} className="text-red-700">
         <ArrowLeft className="w-6 h-6" />
@@ -104,12 +132,12 @@ const Navigation = ({ activeCategory, onCategoryChange, onFilterClick, classific
 }) => {
   const defaultCategories = ['古币', '珍宝', '陶瓷', '书画'];
   const classificationCategories = Object.values(classification).map(item => item.unicode);
-  const categories = classificationCategories.length >= defaultCategories.length 
-    ? classificationCategories 
+  const categories = classificationCategories.length >= defaultCategories.length
+    ? classificationCategories
     : [...classificationCategories, ...defaultCategories.slice(classificationCategories.length)];
 
   return (
-    <nav className="flex items-center p-2 bg-white border-b border-gray-200">
+    <nav className="fixed top-16 left-0 right-0 z-40 flex items-center p-2 bg-white border-b border-gray-200">
       <button
         className="p-2 text-red-700 mr-2"
         onClick={onFilterClick}
@@ -154,7 +182,7 @@ const FilterPopover = ({ isOpen, onClose, onFilterChange, classification }: {
     newSelections.fill('', level + 1); // 清空后续选择
     setSelections(newSelections);
     onFilterChange(newSelections); // 每次选择后立即触发筛选
-    
+
     let currentLevel = classification;
     for (let i = 0; i <= level; i++) {
       if (currentLevel[newSelections[i]]) {
@@ -172,16 +200,20 @@ const FilterPopover = ({ isOpen, onClose, onFilterChange, classification }: {
     }
   }
 
+  // 渲染当前筛选步骤的内容
   const renderStepContent = () => {
+    // 从分的根级开始
     let currentLevel = classification;
+    // 遍历当前选择，直到达到当前步骤
     for (let i = 0; i < step; i++) {
       if (currentLevel[selections[i]]) {
         currentLevel = currentLevel[selections[i]].childs;
       } else {
-        return null;
+        return null; // 如果选择路径无效，返回 null
       }
     }
 
+    // 渲染当前级别的所有选项
     return Object.entries(currentLevel).map(([key, value]) => (
       <button
         key={key}
@@ -193,19 +225,21 @@ const FilterPopover = ({ isOpen, onClose, onFilterChange, classification }: {
     ));
   }
 
+  // 获取当前选择的路径字符串
   const getSelectionPath = () => {
     let currentLevel = classification;
+    // 遍历所有非空的选择，构建选择路径
     return selections.filter(Boolean).map((selection, index) => {
       const unicode = currentLevel[selection]?.unicode || '';
       currentLevel = currentLevel[selection]?.childs || {};
       return unicode;
-    }).join(' - ');
+    }).join(' - '); // 用 ' - ' 连接路径中的各个选择
   }
 
   if (!isOpen) return null;
 
   return (
-    <div className="absolute top-full left-0 mt-2 bg-white rounded-lg shadow-lg p-4 w-64 z-50">
+    <div className="fixed top-28 left-0 right-0 z-40 bg-white rounded-lg shadow-lg p-4 mx-2">
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-lg font-bold">筛选</h2>
         <button onClick={onClose}>
@@ -224,12 +258,13 @@ const FilterPopover = ({ isOpen, onClose, onFilterChange, classification }: {
   )
 }
 
-// Profile Header Component
-const ProfileHeader = ({ username, userId, isLoggedIn, onLoginClick }: { 
-  username?: string; 
-  userId?: string; 
-  isLoggedIn: boolean; 
-  onLoginClick: () => void 
+// Profile Header Component 
+// “我的”页面
+const ProfileHeader = ({ username, userId, isLoggedIn, onLoginClick }: {
+  username?: string;
+  userId?: string;
+  isLoggedIn: boolean;
+  onLoginClick: () => void
 }) => (
   <div className="relative h-48 bg-gradient-to-b from-red-700 to-red-800 flex items-end">
     <div className="absolute bottom-0 left-0 right-0 flex items-end p-4">
@@ -247,8 +282,8 @@ const ProfileHeader = ({ username, userId, isLoggedIn, onLoginClick }: {
             <p className="text-xs text-red-100">用户ID: {userId}</p>
           </>
         ) : (
-          <button 
-            onClick={onLoginClick} 
+          <button
+            onClick={onLoginClick}
             className="px-4 py-2 bg-white text-red-700 rounded-full font-medium"
           >
             请登录
@@ -260,9 +295,10 @@ const ProfileHeader = ({ username, userId, isLoggedIn, onLoginClick }: {
 )
 
 // Profile Menu Item Component
+// 我的页面组件 -> 设置/收藏/历史
 const ProfileMenuItem = ({ icon, title, onClick, disabled = false }: { icon: React.ReactNode; title: string; onClick: () => void; disabled?: boolean }) => (
-  <div 
-    className={`flex items-center justify-between p-4 border-b border-gray-200 ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`} 
+  <div
+    className={`flex items-center justify-between p-4 border-b border-gray-200 ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
     onClick={disabled ? undefined : onClick}
   >
     <div className="flex items-center">
@@ -274,16 +310,18 @@ const ProfileMenuItem = ({ icon, title, onClick, disabled = false }: { icon: Rea
 )
 
 // Artifact Card Component
-const ArtifactCard = ({ id, image, title, subtitle, onClick }: {
+// 文物卡片
+const ArtifactCard = ({ id, image, title, subtitle, onClick, size = 'small' }: {
   id: string;
   image: string;
   title: string;
   subtitle: string;
   onClick: (id: string) => void;
+  size?: 'thumbnail' | 'small' | 'medium';
 }) => (
   <div className="bg-white rounded-lg shadow-md overflow-hidden cursor-pointer" onClick={() => onClick(id)}>
     <div className="aspect-square bg-gray-200 mb-2">
-      <img src={image || "/placeholder.svg?height=200&width=200"} alt={title} className="w-full h-full object-cover" />
+      <img src={getProxiedImageUrl(image, size)} alt={title} className="w-full h-full object-cover" />
     </div>
     <div className="p-2">
       <h3 className="text-sm font-medium truncate text-gray-800">{title}</h3>
@@ -293,6 +331,7 @@ const ArtifactCard = ({ id, image, title, subtitle, onClick }: {
 )
 
 // Artifact Grid Component
+// 文物网格
 const ArtifactGrid = ({ filter, onArtifactClick, artifacts, loading, hasMore, setPage, lastArtifactElementRef }: {
   filter: string[];
   onArtifactClick: (pid: string) => void;
@@ -303,7 +342,7 @@ const ArtifactGrid = ({ filter, onArtifactClick, artifacts, loading, hasMore, se
   lastArtifactElementRef: (node: HTMLDivElement | null) => void;
 }) => {
   return (
-    <div className="grid grid-cols-2 gap-4 p-4">
+    <div className="grid grid-cols-2 gap-4 p-4 pb-20">
       {artifacts.map((artifact, index) => (
         <div
           key={artifact.pid}
@@ -315,6 +354,7 @@ const ArtifactGrid = ({ filter, onArtifactClick, artifacts, loading, hasMore, se
             title={artifact.title}
             subtitle=""
             onClick={onArtifactClick}
+            size="small"
           />
         </div>
       ))}
@@ -326,8 +366,9 @@ const ArtifactGrid = ({ filter, onArtifactClick, artifacts, loading, hasMore, se
 };
 
 // Bottom Navigation Component
+// 底部导航
 const BottomNav = ({ activePage, onPageChange }: { activePage: string, onPageChange: (page: string) => void }) => (
-  <nav className="fixed bottom-0 left-0 right-0 flex justify-around items-end bg-white border-t border-gray-200 p-2">
+  <nav className="fixed bottom-0 left-0 right-0 z-40 flex justify-around items-end bg-white border-t border-gray-200 p-2">
     <button
       className={`flex flex-col items-center ${activePage === 'database' ? 'text-red-700' : 'text-gray-600'}`}
       onClick={() => onPageChange('database')}
@@ -336,7 +377,7 @@ const BottomNav = ({ activePage, onPageChange }: { activePage: string, onPageCha
       <span className="text-xs">数据库</span>
     </button>
     <button
-      className="flex flex-col items-center relative -top-2" 
+      className="flex flex-col items-center relative -top-0"
       onClick={() => onPageChange('identify')}
     >
       <div className="w-[70px] h-[70px] rounded-full bg-red-700 flex items-center justify-center text-white absolute bottom-0">
@@ -354,6 +395,7 @@ const BottomNav = ({ activePage, onPageChange }: { activePage: string, onPageCha
 )
 
 // Login Component
+// 登录组件
 const Login = ({ onLogin, onSwitchToRegister }: { onLogin: (username: string, password: string) => Promise<void>, onSwitchToRegister: () => void }) => {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -420,6 +462,7 @@ const Login = ({ onLogin, onSwitchToRegister }: { onLogin: (username: string, pa
 }
 
 // Register Component
+// 注册组件
 const Register = ({ onRegister, onSwitchToLogin }: { onRegister: (username: string, password: string) => Promise<void>, onSwitchToLogin: () => void }) => {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -488,7 +531,7 @@ const Register = ({ onRegister, onSwitchToLogin }: { onRegister: (username: stri
             type="submit"
             className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
           >
-          注册
+            注册
           </button>
         </form>
         <div className="mt-4 text-center">
@@ -501,7 +544,8 @@ const Register = ({ onRegister, onSwitchToLogin }: { onRegister: (username: stri
   )
 }
 
-// Detail Page Component 详细页面组件
+// Detail Page Component
+// 文物详细页面组件
 const DetailPage = ({ pid, onBack, showToast }: { pid: string, onBack: () => void, showToast: (message: string, type: 'success' | 'error') => void }) => {
   const [artifact, setArtifact] = useState<{
     pid: string;
@@ -517,7 +561,7 @@ const DetailPage = ({ pid, onBack, showToast }: { pid: string, onBack: () => voi
       const token = localStorage.getItem('token');
       if (token) {
         try {
-          await axios.post('http://localhost:3000/api/user-actions/record', { pid: pid, timestamp: Date.now() }, {
+          await axios.post('/api/user-actions/record', { pid: pid, timestamp: Date.now() }, {
             headers: { Authorization: token }
           });
         } catch (error) {
@@ -531,16 +575,17 @@ const DetailPage = ({ pid, onBack, showToast }: { pid: string, onBack: () => voi
   useEffect(() => {
     const fetchArtifact = async () => {
       try {
-        const response = await axios.get(`http://localhost:3000/api/artifacts/search?id=${pid}`);
+        const response = await axios.get(`/api/artifacts/search?id=${pid}`);
         const data = response.data;
         setArtifact(data);
         // 记录浏览历史
         recordHistory(pid);
-        
+
         // 检查是否已收藏
         const favoriteResponse = await api.get('/user-actions/favorite');
         const favorites = favoriteResponse.data;
-        setIsFavorited(favorites.some((fav: { pid: string }) => fav.pid === pid));
+        console.log(favorites.some((fav: { pid: string }) => fav.pid == pid))
+        setIsFavorited(favorites.some((fav: { pid: string }) => fav.pid == pid));
       } catch (error) {
         console.error('Failed to fetch artifact details:', error);
       } finally {
@@ -576,17 +621,16 @@ const DetailPage = ({ pid, onBack, showToast }: { pid: string, onBack: () => voi
   }
 
   return (
-    <div className="min-h-screen bg-white">
-      <Header showBackButton={true} onBackClick={onBack} title={artifact.title} isLoggedIn={false} onLoginClick={() => {}} />
+    <div className="min-h-screen bg-white pt-16 pb-20"> {/* 添加 pb-20 */}
+      <Header showBackButton={true} onBackClick={onBack} title={artifact.title} isLoggedIn={false} onLoginClick={() => { }} />
       <div className="p-4">
-        <img src={artifact.img} alt={artifact.title} className="w-full h-64 object-cover rounded-lg mb-4" />
+        <img src={getProxiedImageUrl(artifact.img, 'original')} alt={artifact.title} className="w-full h-auto object-contain rounded-lg mb-4" />
         <h2 className="text-2xl font-bold mb-2">{artifact.title}</h2>
         <p className="text-gray-600 mb-4">{artifact.text}</p>
         <button
           onClick={handleFavorite}
-          className={`flex items-center justify-center w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${
-            isFavorited ? 'bg-gray-600 hover:bg-gray-700' : 'bg-red-600 hover:bg-red-700'
-          } focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500`}
+          className={`flex items-center justify-center w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${isFavorited ? 'bg-gray-600 hover:bg-gray-700' : 'bg-red-600 hover:bg-red-700'
+            } focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500`}
         >
           <Heart className={`w-5 h-5 mr-2 ${isFavorited ? 'fill-current' : ''}`} />
           {isFavorited ? '取消收藏' : '加入收藏'}
@@ -596,56 +640,74 @@ const DetailPage = ({ pid, onBack, showToast }: { pid: string, onBack: () => voi
   );
 }
 
-// History Page Component
+// HistoryPage 
+// 浏览历史页面组件
 const HistoryPage = ({ onBack, onArtifactClick }: { onBack: () => void, onArtifactClick: (pid: string) => void }) => {
-  const [history, setHistory] = useState<Array<{id: string, pid: string, url: string, title: string, timestamp: number}>>([]);
-  const [loading, setLoading] = useState(true);
+  const [history, setHistory] = useState<Array<{ id: string, pid: string, url: string, title: string, timestamp: number }>>([]);
+  const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+
+  const fetchHistory = useCallback(async () => {
+    if (loading || !hasMore) return;
+    setLoading(true);
+    try {
+      const response = await api.get('/user-actions/history', { params: { page, limit: 15 } });
+      const historyData = response.data;
+      const detailedHistory = await Promise.all(historyData.map(async (item: { id: string, pid: string, timestamp: number }) => {
+        const artifactResponse = await api.get(`/artifacts/search?id=${item.pid}`);
+        return {
+          id: item.id,
+          pid: item.pid,
+          url: getProxiedImageUrl(artifactResponse.data.img),
+          title: artifactResponse.data.title,
+          timestamp: item.timestamp
+        };
+      }));
+      setHistory(prev => [...prev, ...detailedHistory]);
+      setHasMore(detailedHistory.length === 15);
+      setPage(prev => prev + 1);
+    } catch (error) {
+      console.error('Failed to fetch history:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [page, loading, hasMore]);
 
   useEffect(() => {
-    const fetchHistory = async () => {
-      try {
-        const response = await api.get('/user-actions/history');
-        const historyData = response.data;
-        const detailedHistory = await Promise.all(historyData.map(async (item: {id: string, pid: string, timestamp: number}) => {
-          const artifactResponse = await api.get(`/artifacts/search?id=${item.pid}`);
-          return {
-            id: item.id,
-            pid: item.pid,
-            url: artifactResponse.data.img,
-            title: artifactResponse.data.title,
-            timestamp: item.timestamp
-          };
-        }));
-        setHistory(detailedHistory);
-      } catch (error) {
-        console.error('Failed to fetch history:', error);
-        setHistory([]);
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchHistory();
   }, []);
 
-  const handleArtifactClick = (pid: string) => {
-    onArtifactClick(pid);
-  };
+  const observer = useRef<IntersectionObserver>();
+  const lastHistoryElementRef = useCallback((node: HTMLElement | null) => {
+    if (loading) return;
+    if (observer.current) observer.current.disconnect();
+    observer.current = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && hasMore) {
+        fetchHistory();
+      }
+    });
+    if (node) observer.current.observe(node);
+  }, [loading, hasMore, fetchHistory]);
 
   return (
-    <div className="min-h-screen bg-white">
-      <Header showBackButton={true} onBackClick={onBack} title="浏览历史" isLoggedIn={true} onLoginClick={() => {}} />
+    <div className="min-h-screen bg-white pt-16 pb-20"> {/* 添加 pb-20 */}
+      <Header showBackButton={true} onBackClick={onBack} title="浏览历史" isLoggedIn={true} onLoginClick={() => { }} />
       <div className="p-4">
-        {loading ? (
-          <p className="text-center text-gray-600">加载中...</p>
-        ) : history.length === 0 ? (
+        {history.length === 0 && !loading ? (
           <p className="text-center text-gray-600">暂无浏览历史</p>
         ) : (
           <ul className="divide-y divide-gray-200">
-            {history.map((item) => (
-              <li key={item.id} className="py-4 cursor-pointer" onClick={() => handleArtifactClick(item.pid)}>
+            {history.map((item, index) => (
+              <li
+                key={item.id}
+                className="py-4 cursor-pointer"
+                onClick={() => onArtifactClick(item.pid)}
+                ref={index === history.length - 1 ? lastHistoryElementRef : null}
+              >
                 <div className="flex items-center space-x-4">
                   <div className="flex-shrink-0">
-                    <img className="h-12 w-12 rounded-md" src={item.url} alt={item.title} />
+                    <img className="h-12 w-12 rounded-md object-cover" src={getProxiedImageUrl(item.url, 'thumbnail')} alt={item.title} />
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900 truncate">{item.title}</p>
@@ -656,47 +718,67 @@ const HistoryPage = ({ onBack, onArtifactClick }: { onBack: () => void, onArtifa
             ))}
           </ul>
         )}
+        {loading && <p className="text-center text-gray-600">加载中...</p>}
       </div>
     </div>
   );
 };
 
-// FavoritesPage Component
+// FavoritesPage 
+// 收藏页面组件
 const FavoritesPage = ({ onBack, onArtifactClick, showToast }: { onBack: () => void, onArtifactClick: (pid: string) => void, showToast: (message: string, type: 'success' | 'error') => void }) => {
-  const [favorites, setFavorites] = useState<Array<{id: string, pid: string, url: string, title: string}>>([]);
-  const [loading, setLoading] = useState(true);
+  const [favorites, setFavorites] = useState<Array<{ id: string, pid: string, url: string, title: string }>>([]);
+  const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
 
   const fetchFavorites = useCallback(async () => {
+    if (loading || !hasMore) return;
+    setLoading(true);
     try {
-      const response = await api.get('/user-actions/favorite');
+      const response = await api.get('/user-actions/favorite', { params: { page, limit: 15 } });
       const favoritesData = response.data;
-      const detailedFavorites = await Promise.all(favoritesData.map(async (fav: {id: string, pid: string}) => {
+      const detailedFavorites = await Promise.all(favoritesData.map(async (fav: { id: string, pid: string }) => {
         const artifactResponse = await api.get(`/artifacts/search?id=${fav.pid}`);
         return {
           id: fav.id,
           pid: fav.pid,
-          url: artifactResponse.data.img,
+          url: getProxiedImageUrl(artifactResponse.data.img),
           title: artifactResponse.data.title
         };
       }));
-      setFavorites(detailedFavorites);
+      setFavorites(prev => [...prev, ...detailedFavorites]);
+      setHasMore(detailedFavorites.length === 15);
+      setPage(prev => prev + 1);
     } catch (error) {
       console.error('Failed to fetch favorites:', error);
       showToast('获取收藏失败', 'error');
     } finally {
       setLoading(false);
     }
-  }, [showToast]);
+  }, [page, loading, hasMore, showToast]);
 
   useEffect(() => {
     fetchFavorites();
-  }, [fetchFavorites]);
+  }, []);
+
+  const observer = useRef<IntersectionObserver>();
+  const lastFavoriteElementRef = useCallback((node: HTMLDivElement | null) => {
+    if (loading) return;
+    if (observer.current) observer.current.disconnect();
+    observer.current = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && hasMore) {
+        fetchFavorites();
+      }
+    });
+    if (node) observer.current.observe(node);
+  }, [loading, hasMore, fetchFavorites]);
 
   const handleRemoveFavorite = async (pid: string) => {
     try {
       await api.delete('/user-actions/favorite', { data: { pid } });
       showToast('已从收藏中移除', 'success');
-      fetchFavorites(); // 重新获取收藏列表
+      setFavorites(prev => prev.filter(fav => fav.pid !== pid));
     } catch (error) {
       console.error('Failed to remove favorite:', error);
       showToast('移除收藏失败', 'error');
@@ -704,22 +786,24 @@ const FavoritesPage = ({ onBack, onArtifactClick, showToast }: { onBack: () => v
   };
 
   return (
-    <div className="min-h-screen bg-white">
-      <Header showBackButton={true} onBackClick={onBack} title="我的收藏" isLoggedIn={true} onLoginClick={() => {}} />
+    <div className="min-h-screen bg-white pt-16 pb-20"> {/* 添加 pb-20 */}
+      <Header showBackButton={true} onBackClick={onBack} title="我的收藏" isLoggedIn={true} onLoginClick={() => { }} />
       <div className="p-4">
-        {loading ? (
-          <p className="text-center text-gray-600">加载中...</p>
-        ) : favorites.length === 0 ? (
+        {favorites.length === 0 && !loading ? (
           <p className="text-center text-gray-600">暂无收藏</p>
         ) : (
           <div className="grid grid-cols-2 gap-4">
-            {favorites.map((favorite) => (
-              <div key={favorite.id} className="relative">
-                <div 
+            {favorites.map((favorite, index) => (
+              <div
+                key={favorite.id}
+                className="relative"
+                ref={index === favorites.length - 1 ? lastFavoriteElementRef : null}
+              >
+                <div
                   className="cursor-pointer"
                   onClick={() => onArtifactClick(favorite.pid)}
                 >
-                  <img src={favorite.url} alt={favorite.title} className="w-full h-40 object-cover rounded-lg" />
+                  <img src={getProxiedImageUrl(favorite.url, 'small')} alt={favorite.title} className="w-full h-40 object-cover rounded-lg" />
                   <p className="mt-2 text-sm font-medium text-gray-900 truncate">{favorite.title}</p>
                 </div>
                 <button
@@ -732,12 +816,14 @@ const FavoritesPage = ({ onBack, onArtifactClick, showToast }: { onBack: () => v
             ))}
           </div>
         )}
+        {loading && <p className="text-center text-gray-600">加载中...</p>}
       </div>
     </div>
   );
 };
 
-// Toast 组件
+// Toast 
+// 弹窗组件
 const Toast = ({ message, type, onClose }: { message: string; type: 'success' | 'error'; onClose: () => void }) => {
   const [isVisible, setIsVisible] = useState(false);
   const [isLeaving, setIsLeaving] = useState(false);
@@ -747,17 +833,17 @@ const Toast = ({ message, type, onClose }: { message: string; type: 'success' | 
     const timer = setTimeout(() => {
       setIsLeaving(true);
       setTimeout(onClose, 500); // 等待退出动画完成后关闭
-    }, 1500); // 显示时 = 下落时间(500ms) + 停留时间(1000ms)
+    }, 1500); // 显示时间 = 下落时间(500ms) + 停留时间(1000ms)
 
     return () => clearTimeout(timer);
   }, [onClose]);
 
   return (
-    <div 
+    <div
       className={`
         fixed top-0 left-1/2 transform -translate-x-1/2 mt-4 p-4 rounded-md shadow-md 
         ${type === 'success' ? 'bg-green-500' : 'bg-red-700'} text-white
-        transition-all duration-500 ease-in-out
+        transition-all duration-500 ease-in-out z-50
         ${isVisible ? (isLeaving ? '-translate-y-full opacity-0' : 'translate-y-0 opacity-100') : '-translate-y-full opacity-0'}
       `}
     >
@@ -771,60 +857,112 @@ const Toast = ({ message, type, onClose }: { message: string; type: 'success' | 
   );
 };
 
-// IdentifyPage 组件
-const IdentifyPage = () => {
+// IdentifyPage 
+// 识别页面组件
+const IdentifyPage = ({ showToast, setCameraCleanupCallback }: {
+  showToast: (message: string, type: 'success' | 'error') => void,
+  setCameraCleanupCallback: (callback: (() => void) | null) => void
+}) => {
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
-  const [identifyResult, setIdentifyResult] = useState<string | null>(null);
+  const [identifyResult, setIdentifyResult] = useState<any[] | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
+  const [isCameraOn, setIsCameraOn] = useState(false);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [identifyProgress, setIdentifyProgress] = useState(0);
+  const [isIdentifying, setIsIdentifying] = useState(false);
 
-  useEffect(() => {
+  const startCamera = useCallback(() => {
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-      navigator.mediaDevices.getUserMedia({ video: true })
+      navigator.mediaDevices.getUserMedia({
+        video: { facingMode: facingMode }
+      })
         .then(stream => {
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
+            streamRef.current = stream;
+            setIsCameraOn(true);
           }
         })
-        .catch(error => console.error("摄像头访问失败:", error));
+        .catch(error => {
+          console.error("摄像头访问失败:", error);
+          showToast("无法访问摄像头", 'error');
+        });
+    }
+  }, [facingMode, showToast]);
+
+  const stopCamera = useCallback(() => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
+      }
+      streamRef.current = null;
+      setIsCameraOn(false);
     }
   }, []);
 
+  useEffect(() => {
+    console.log("facingMode changed:", facingMode);
+    startCamera();
+  }, [facingMode, startCamera]);
+
+  useEffect(() => {
+    startCamera(); // 自动启动摄像头
+    setCameraCleanupCallback(() => stopCamera);
+    return () => {
+      stopCamera();
+      setCameraCleanupCallback(null);
+    };
+  }, [stopCamera, setCameraCleanupCallback]);
+
+  // 识别 -> 切换摄像头
+  const toggleCamera = () => {
+    stopCamera();
+    setFacingMode(prevMode => prevMode === 'user' ? 'environment' : 'user');
+  };
+
+  // 识别 -> 拍照
   const handleCapture = () => {
+    // 可有可无，没开摄像头的话先开摄像头，防止极端bug
+    if (!isCameraOn) {
+      startCamera();
+      return;
+    }
     if (videoRef.current && canvasRef.current) {
       const video = videoRef.current;
       const canvas = canvasRef.current;
       const aspectRatio = 1.2;
-      
+
       let cropWidth = video.videoWidth;
       let cropHeight = video.videoWidth * aspectRatio;
-      
-      // 如果计算出的高度大于视频高度，则以视频高度为基准
+
       if (cropHeight > video.videoHeight) {
         cropHeight = video.videoHeight;
         cropWidth = video.videoHeight / aspectRatio;
       }
-      
-      // 设置canvas大小为裁剪尺寸
+
       canvas.width = cropWidth;
       canvas.height = cropHeight;
-      
+
       const context = canvas.getContext('2d');
       if (context) {
-        // 计算裁剪区域的起始坐标（居中裁剪）
         const sx = (video.videoWidth - cropWidth) / 2;
         const sy = (video.videoHeight - cropHeight) / 2;
-        
-        // 在canvas上绘制裁剪后的图像
+
         context.drawImage(video, sx, sy, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
         const imageDataUrl = canvas.toDataURL('image/jpeg');
         setCapturedImage(imageDataUrl);
+        stopCamera();
       }
     }
   };
 
+  // 识别 -> 上传图片
   const handleUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    stopCamera();
     const file = event.target.files?.[0];
     if (file) {
       const reader = new FileReader();
@@ -833,18 +971,18 @@ const IdentifyPage = () => {
         img.onload = () => {
           const canvas = document.createElement('canvas');
           const aspectRatio = 1.2;
-          
+
           let cropWidth = img.width;
           let cropHeight = img.width * aspectRatio;
-          
+
           if (cropHeight > img.height) {
             cropHeight = img.height;
             cropWidth = img.height / aspectRatio;
           }
-          
+
           canvas.width = cropWidth;
           canvas.height = cropHeight;
-          
+
           const ctx = canvas.getContext('2d');
           if (ctx) {
             const sx = (img.width - cropWidth) / 2;
@@ -860,71 +998,95 @@ const IdentifyPage = () => {
     }
   };
 
+  // 识别 -> 开始识别按钮
   const handleIdentify = async () => {
     if (capturedImage) {
       try {
+        setIsIdentifying(true);
+        setIdentifyProgress(0);
         const formData = new FormData();
         const blob = await fetch(capturedImage).then(r => r.blob());
         formData.append('file', blob, 'image.jpg');
 
-        const response = await fetch('http://localhost:3000/upload', {
+        const response = await fetch('/api/upload', {
           method: 'POST',
           body: formData,
         });
 
-        if (response.ok) {
-          const result = await response.json();
-          setIdentifyResult(result.itemInfo);
-        } else {
-          console.error('识别失败');
-          setIdentifyResult(null);
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+
+        while (true) {
+          const { done, value } = await reader!.read();
+          if (done) break;
+          const decodedChunk = decoder.decode(value);
+          const events = decodedChunk.split('\n\n');
+          for (const event of events) {
+            if (event.trim() === '') continue;
+            const parsedData = JSON.parse(event.replace('data: ', ''));
+            console.log('Received data:', parsedData); // 添加日志
+            if (parsedData.progress !== undefined) {
+              console.log('Setting progress:', parsedData.progress);
+              setIdentifyProgress(parsedData.progress);
+            } else if (parsedData.message === 'success') {
+              setIdentifyResult(parsedData.itemInfo);
+              showToast('识别成功', 'success');
+            } else if (parsedData.message === 'failed') {
+              setIdentifyResult(null);
+              showToast(parsedData.error || '识别失败', 'error');
+            }
+          }
         }
       } catch (error) {
         console.error('识别过程出错:', error);
         setIdentifyResult(null);
+        showToast('识别过程出错，请重试', 'error');
+      } finally {
+        setIsIdentifying(false);
       }
     }
   };
 
-  const renderResultTable = (result: any[]) => (
-    <table className="w-full mt-4 border-collapse border border-gray-300">
-      <tbody>
-        {result.map((item, index) => (
-          <tr key={index} className={index % 2 === 0 ? 'bg-gray-50' : 'bg-white'}>
-            <td className="border border-gray-300 p-2 font-semibold">{item.name}</td>
-            <td className="border border-gray-300 p-2">{item.value}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
+  // 识别 -> 重新拍照
+  const handleRetake = () => {
+    setCapturedImage(null);
+    setIdentifyResult(null);
+    startCamera();
+  };
 
   return (
-    <div className="p-4">
-      {/* <h2 className="text-xl font-bold mb-4">文物识别</h2> */}
+    <div className="p-4 pb-20">
       {!capturedImage ? (
         <>
-          <div className="relative w-full pb-[120%] mb-4"> {/* 宽高比容器 */}
-            <video 
-              ref={videoRef} 
-              autoPlay 
+          <div className="relative w-full pb-[120%] mb-4">
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
               className="absolute top-0 left-0 w-full h-full object-cover rounded-lg"
             />
           </div>
           <div className="flex justify-around mb-4">
             <button
+              onClick={() => fileInputRef.current?.click()}
+              className="flex flex-col items-center bg-red-700 text-white py-2 px-4 rounded-lg hover:bg-red-800"
+            >
+              <Upload className="w-6 h-6 mb-1" />
+              上传
+            </button>
+            <button
               onClick={handleCapture}
-              className="flex flex-col items-center bg-red-600 text-white py-2 px-4 rounded-lg hover:bg-red-700"
+              className="flex flex-col items-center bg-red-700 text-white py-2 px-4 rounded-lg hover:bg-red-800"
             >
               <Camera className="w-6 h-6 mb-1" />
               拍照
             </button>
             <button
-              onClick={() => fileInputRef.current?.click()}
-              className="flex flex-col items-center bg-red-600 text-white py-2 px-4 rounded-lg hover:bg-red-700"
+              onClick={toggleCamera}
+              className="flex flex-col items-center bg-red-700 text-white py-2 px-4 rounded-lg hover:bg-red-800"
             >
-              <Upload className="w-6 h-6 mb-1" />
-              上传图片
+              <RefreshCw className="w-6 h-6 mb-1" />
+              切换
             </button>
             <input
               type="file"
@@ -937,28 +1099,60 @@ const IdentifyPage = () => {
         </>
       ) : (
         <div className="mb-4">
-          <div className="relative w-full pb-[120%] mb-4"> {/* 宽高比容器 */}
-            <img 
-              src={capturedImage} 
-              alt="Captured" 
+          <div className="relative w-full pb-[120%] mb-4">
+            <img
+              src={capturedImage}
+              alt="Captured"
               className="absolute top-0 left-0 w-full h-full object-cover rounded-lg"
             />
           </div>
           <button
             onClick={handleIdentify}
-            className="w-full bg-red-600 text-white py-2 px-4 rounded-lg hover:bg-red-700"
+            className={`w-full bg-red-600 text-white py-2 px-4 rounded-lg hover:bg-red-700 mb-2 ${isIdentifying ? 'opacity-50 cursor-not-allowed' : ''}`}
+            disabled={isIdentifying}
           >
-            开始识别
+            {isIdentifying ? '识别中...' : '开始识别'}
           </button>
-          {identifyResult && (
-            <div className="mt-4 p-4 bg-gray-100 rounded-lg">
-              <h3 className="font-bold mb-2">识别结果：</h3>
-              {renderResultTable(identifyResult)}
+          {isIdentifying && (
+            <div className="w-full bg-gray-200 rounded-full h-2.5 mb-4">
+              <div
+                className="bg-red-600 h-2.5 rounded-full transition-all duration-300 ease-in-out"
+                style={{ width: `${identifyProgress}%` }}
+              ></div>
+            </div>
+          )}
+          {identifyResult && identifyResult.length > 0 && (
+            <div className="mt-4 bg-white rounded-lg shadow overflow-hidden">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      属性
+                    </th>
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      值
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {identifyResult.map((item, index) => (
+                    <tr key={index} className={index % 2 === 0 ? 'bg-gray-50' : 'bg-white'}>
+                      <td className="px-6 py-4 text-sm font-medium text-gray-900 break-words">
+                        {item.name}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-500 break-words">
+                        {item.value}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
           <button
-            onClick={() => setCapturedImage(null)}
-            className="mt-4 w-full bg-gray-600 text-white py-2 px-4 rounded-lg hover:bg-gray-700"
+            onClick={handleRetake}
+            className={`w-full bg-gray-600 text-white py-2 px-4 rounded-lg hover:bg-gray-700 mt-4 ${isIdentifying ? 'opacity-50 cursor-not-allowed' : ''}`}
+            disabled={isIdentifying}
           >
             重新拍照
           </button>
@@ -970,34 +1164,29 @@ const IdentifyPage = () => {
 };
 
 // Main App Component
+// 主页面组件
 export function AppComponent() {
   const [activeCategory, setActiveCategory] = useState('机制银币')
   const [activeFilter, setActiveFilter] = useState(['jizhiyinbi', '', '', '', '', ''])
-  const [activePage, setActivePage] = useState('database')
   const [isLoggedIn, setIsLoggedIn] = useState(false)
   const [showLogin, setShowLogin] = useState(false)
   const [showRegister, setShowRegister] = useState(false)
   const [userData, setUserData] = useState<{ username: string; userRole: string } | null>(null)
   const [selectedPid, setSelectedPid] = useState<string | null>(null)
-  const [showHistory, setShowHistory] = useState(false)
   const [classification, setClassification] = useState({})
-  const [artifacts, setArtifacts] = useState<Array<{pid: string, url: string, title: string}>>([]);
+  const [artifacts, setArtifacts] = useState<Array<{ pid: string, url: string, title: string }>>([]);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const observer = useRef<IntersectionObserver | null>(null);
-  const [showFavorites, setShowFavorites] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [cameraCleanupCallback, setCameraCleanupCallback] = useState<(() => void) | null>(null);
 
   // 添加 isFilterPopoverOpen 状态
   const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
 
-  // 在 AppComponent 中添加新的状态
-  const [pageStack, setPageStack] = useState<PageStack>({
-    database: ['main'],
-    identify: ['main'],
-    profile: ['main'],
-  });
+  // 修改页面栈的状态
+  const [pageStack, setPageStack] = useState<string[]>(['database']);
 
   const lastArtifactElementRef = useCallback((node: HTMLDivElement | null) => {
     if (loading) return;
@@ -1025,7 +1214,7 @@ export function AppComponent() {
       };
       // 移除所有空字符串的参数
       (Object.keys(params) as Array<keyof Params>).forEach(key => params[key] === '' && delete params[key]);
-      
+
       const response = await api.get('/artifacts/searchItems', { params });
       const newArtifacts = response.data;
       setArtifacts(prev => page === 1 ? newArtifacts : [...prev, ...newArtifacts]);
@@ -1059,7 +1248,7 @@ export function AppComponent() {
   useEffect(() => {
     const fetchClassification = async () => {
       try {
-        const response = await axios.get('http://localhost:3000/api/artifacts/classification')
+        const response = await axios.get('/api/artifacts/classification')
         setClassification(response.data)
       } catch (error) {
         console.error('Failed to fetch classification:', error)
@@ -1070,12 +1259,12 @@ export function AppComponent() {
 
   const vertifyLoginStatus = async (token: string) => {
     try {
-      const response = await axios.get('http://localhost:3000/api/users/verify', {
+      const response = await axios.get('/api/users/verify', {
         headers: {
           Authorization: token
         }
       });
-      
+
       if (response.status === 200 && response.data) {
         const { username, id } = response.data;
         setIsLoggedIn(true);
@@ -1089,13 +1278,14 @@ export function AppComponent() {
     }
   }
 
+  // 登录
   const handleLogin = async (username: string, password: string) => {
     try {
-      const response = await axios.post('http://localhost:3000/api/users/login', {
+      const response = await axios.post('/api/users/login', {
         username,
         password
       });
-      
+
       if (response.status === 200 && response.data.token) {
         const { token, id, username } = response.data;
         localStorage.setItem('token', token);
@@ -1115,6 +1305,7 @@ export function AppComponent() {
     }
   }
 
+  // 登出
   const handleLogout = () => {
     setIsLoggedIn(false);
     setUserData(null);
@@ -1129,47 +1320,61 @@ export function AppComponent() {
     handleFilterChange(newFilter); // 触发筛选
   };
 
+  // 页面导航
+  const navigateTo = (page: string) => {
+    if (['database', 'identify', 'profile'].includes(page)) {
+      // 根页面：清空栈，将新页面加入
+      let oldStackLength = pageStack.length;
+      setPageStack([page]);
+      if(oldStackLength > 1){
+        window.history.go(0-pageStack.length);
+      }
+      // window.history.pushState({ page }, '', ``);
+    } else {
+      // 子页面：将新页面推入栈顶
+      setPageStack(prev => [...prev, page]);
+      window.history.pushState({ page }, '', ``);
+    }
+
+    // 在切换页面时执行清理回调
+    if (cameraCleanupCallback) {
+      cameraCleanupCallback();
+      setCameraCleanupCallback(null);
+    }
+
+    setShowLogin(false);
+    setShowRegister(false);
+    window.scrollTo(0, 0);
+
+    // 输出页面栈
+    console.log('页面栈:', pageStack, '\nnavigate to:', page);
+  };
+
+  // 修改返回函数
+  const goBack = () => {
+    setPageStack(prev => {
+      let newStack;
+      if (prev.length > 1) {
+        // 如果栈中有多个页面，弹出栈顶
+        newStack = prev.slice(0, -1);
+      } else {
+        // 如果栈中只有一个页面，回到数据库页面
+        newStack = ['database'];
+      }
+      // 输出页面栈
+      console.log('页面栈', pageStack, '\ngo back:', newStack);
+      return newStack;
+    });
+    window.scrollTo(0, 0);
+  };
+
   // 修改 handleArtifactClick 函数
   const handleArtifactClick = (pid: string) => {
     setSelectedPid(pid);
-    setPageStack(prev => ({
-      ...prev,
-      [activePage]: [...prev[activePage as keyof PageStack], 'detail'],
-    }));
+    navigateTo('detail');
   };
 
-  // 添加新的导航函数
-  const navigateTo = (page: string) => {
-    if (['database', 'identify', 'profile'].includes(page)) {
-      setActivePage(page as 'database' | 'identify' | 'profile');
-      setPageStack(prev => ({
-        ...prev,
-        [page]: ['main'],
-      }));
-      setShowLogin(false);
-      setShowRegister(false);
-    } else {
-      setPageStack(prev => ({
-        ...prev,
-        [activePage]: [...prev[activePage as keyof PageStack], page],
-      }));
-    }
-  };
-
-  const goBack = () => {
-    setPageStack(prev => {
-      const currentStack = prev[activePage as keyof PageStack];
-      if (currentStack.length > 1) {
-        return {
-          ...prev,
-          [activePage]: currentStack.slice(0, -1),
-        };
-      }
-      return prev;
-    });
-  };
-
-  // 显示 Toast 的函数
+  // 显示 Toast 的数
   const showToast = (message: string, type: 'success' | 'error') => {
     setToast({ message, type });
   };
@@ -1190,6 +1395,7 @@ export function AppComponent() {
     }
   }
 
+  // 注册
   const handleRegister = async (username: string, password: string) => {
     try {
       const response = await api.post('/users/register', {
@@ -1197,10 +1403,10 @@ export function AppComponent() {
         password,
         userRole: 'user' // 默认用户角色
       });
-      
+
       if (response.status === 200) {
         showToast('注册成功', 'success');
-        // 不要在这里自动登录，而是提示用户去登录
+        // 不要在这动登录，而是提示用户去登录
         setShowRegister(false);
         setShowLogin(true);
       } else {
@@ -1216,145 +1422,150 @@ export function AppComponent() {
     }
   }
 
-  // 修改 renderPage 函数
+  // 渲染页面
   const renderPage = () => {
     if (showLogin) {
-      return <Login onLogin={handleLogin} onSwitchToRegister={() => { setShowLogin(false); setShowRegister(true); }} />
+      return <Login onLogin={handleLogin} onSwitchToRegister={() => { setShowLogin(false); setShowRegister(true); }} />;
     }
 
     if (showRegister) {
-      return <Register onRegister={handleRegister} onSwitchToLogin={() => { setShowRegister(false); setShowLogin(true); }} />
+      return <Register onRegister={handleRegister} onSwitchToLogin={() => { setShowRegister(false); setShowLogin(true); }} />;
     }
 
-    const currentStack = pageStack[activePage as keyof PageStack];
-    const currentPage = currentStack[currentStack.length - 1];
+    const currentPage = pageStack[pageStack.length - 1];
 
-    switch (activePage) {
+    switch (currentPage) {
       case 'database':
-        switch (currentPage) {
-          case 'main':
-            return (
-              <>
-                <Header isLoggedIn={isLoggedIn} onLoginClick={() => setShowLogin(true)} />
-                <div className="relative">
-                  <Navigation
-                    activeCategory={activeCategory}
-                    onCategoryChange={handleCategoryChange}
-                    onFilterClick={() => setIsFilterPopoverOpen(!isFilterPopoverOpen)}
-                    classification={classification}
-                  />
-                  <FilterPopover
-                    isOpen={isFilterPopoverOpen}
-                    onClose={() => setIsFilterPopoverOpen(false)}
-                    onFilterChange={handleFilterChange}
-                    classification={classification}
-                  />
-                </div>
-                <ArtifactGrid 
-                  filter={activeFilter} 
-                  onArtifactClick={handleArtifactClick}
-                  artifacts={artifacts}
-                  loading={loading}
-                  hasMore={hasMore}
-                  setPage={setPage}
-                  lastArtifactElementRef={lastArtifactElementRef}
-                />
-              </>
-            );
-          case 'detail':
-            return (
-              <DetailPage
-                pid={selectedPid || ''}
-                onBack={goBack}
-                showToast={showToast}
-              />
-            );
-          default:
-            return null;
-        }
+        return (
+          <div className="pt-28"> {/* 添加上边距，为固定的 Header 和 Navigation 腾出空间 */}
+            <Header isLoggedIn={isLoggedIn} onLoginClick={() => setShowLogin(true)} />
+            <Navigation
+              activeCategory={activeCategory}
+              onCategoryChange={handleCategoryChange}
+              onFilterClick={() => setIsFilterPopoverOpen(!isFilterPopoverOpen)}
+              classification={classification}
+            />
+            <FilterPopover
+              isOpen={isFilterPopoverOpen}
+              onClose={() => setIsFilterPopoverOpen(false)}
+              onFilterChange={handleFilterChange}
+              classification={classification}
+            />
+            <ArtifactGrid
+              filter={activeFilter}
+              onArtifactClick={handleArtifactClick}
+              artifacts={artifacts}
+              loading={loading}
+              hasMore={hasMore}
+              setPage={setPage}
+              lastArtifactElementRef={lastArtifactElementRef}
+            />
+          </div>
+        );
       case 'identify':
         return (
-          <>
+          <div className="pt-16"> {/* 添加上边距，为固定的 Header 腾出空间 */}
             <Header isLoggedIn={isLoggedIn} onLoginClick={() => setShowLogin(true)} title="文物识别" />
-            <IdentifyPage />
-          </>
+            <IdentifyPage
+              showToast={showToast}
+              setCameraCleanupCallback={setCameraCleanupCallback}
+            />
+          </div>
         );
       case 'profile':
-        switch (currentPage) {
-          case 'main':
-            return (
-              <div className="min-h-screen bg-gray-100">
-                <ProfileHeader 
-                  username={userData?.username} 
-                  userId={userData?.userRole} 
-                  isLoggedIn={isLoggedIn} 
-                  onLoginClick={() => setShowLogin(true)} 
-                />
-                <div className="mt-2 bg-white">
-                  <ProfileMenuItem 
-                    icon={<Settings className="w-5 h-5 text-red-700" />} 
-                    title="设置" 
-                    onClick={() => {}} 
-                    disabled={!isLoggedIn}
-                  />
-                  <ProfileMenuItem 
-                    icon={<Star className="w-5 h-5 text-red-700" />} 
-                    title="收藏" 
-                    onClick={() => isLoggedIn ? navigateTo('favorites') : showToast('请先登录', 'error')} 
-                    disabled={!isLoggedIn}
-                  />
-                  <ProfileMenuItem 
-                    icon={<Clock className="w-5 h-5 text-red-700" />} 
-                    title="历史" 
-                    onClick={() => isLoggedIn ? navigateTo('history') : showToast('请先登录', 'error')} 
-                    disabled={!isLoggedIn}
-                  />
-                  {isLoggedIn && (
-                    <button
-                      onClick={handleLogout}
-                      className="w-full text-left px-4 py-3 text-red-700 font-medium border-t border-gray-200"
-                    >
-                      退出登录
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          case 'favorites':
-            return (
-              <FavoritesPage
-                onBack={goBack}
-                onArtifactClick={handleArtifactClick}
-                showToast={showToast}
+        return (
+          <div className="min-h-screen bg-gray-100"> {/* 移除 pt-16 */}
+            <ProfileHeader
+              username={userData?.username}
+              userId={userData?.userRole}
+              isLoggedIn={isLoggedIn}
+              onLoginClick={() => setShowLogin(true)}
+            />
+            <div className="bg-white">
+              <ProfileMenuItem
+                icon={<Settings className="w-5 h-5 text-red-700" />}
+                title="设置"
+                onClick={() => { }}
+                disabled={!isLoggedIn}
               />
-            );
-          case 'history':
-            return (
-              <HistoryPage
-                onBack={goBack}
-                onArtifactClick={handleArtifactClick}
+              <ProfileMenuItem
+                icon={<Star className="w-5 h-5 text-red-700" />}
+                title="收藏"
+                onClick={() => isLoggedIn ? navigateTo('favorites') : showToast('请先登录', 'error')}
+                disabled={!isLoggedIn}
               />
-            );
-          case 'detail':
-            return (
-              <DetailPage
-                pid={selectedPid || ''}
-                onBack={goBack}
-                showToast={showToast}
+              <ProfileMenuItem
+                icon={<Clock className="w-5 h-5 text-red-700" />}
+                title="历史"
+                onClick={() => isLoggedIn ? navigateTo('history') : showToast('请先登录', 'error')}
+                disabled={!isLoggedIn}
               />
-            );
-          default:
-            return null;
-        }
+              {isLoggedIn && (
+                <button
+                  onClick={handleLogout}
+                  className="w-full text-left px-4 py-3 text-red-700 font-medium border-t border-gray-200"
+                >
+                  退出登录
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      case 'favorites':
+        return (
+          <FavoritesPage
+            onBack={() => { window.history.back(); }}//不能直接调用goback(),会循环
+            onArtifactClick={handleArtifactClick}
+            showToast={showToast}
+          />
+        );
+      case 'history':
+        return (
+          <HistoryPage
+            onBack={() => { window.history.back(); }}//不能直接调用goback(),会循环
+            onArtifactClick={handleArtifactClick}
+          />
+        );
+      case 'detail':
+        return (
+          <DetailPage
+            pid={selectedPid || ''}
+            onBack={() => { window.history.back(); }}//不能直接调用goback(),会循环调用
+            showToast={showToast}
+          />
+        );
       default:
         return null;
     }
   };
 
+  // 添加一个 useEffect 来处理浏览器的后退按钮
+  useEffect(() => {
+    if(window.history.state.page == null){
+      window.history.pushState({ page: 'database' }, '', '');
+    }
+    const handlePopState = (event: PopStateEvent) => {
+      console.log('popstate event:', event);
+      if (event.state.page != null) {
+        goBack();
+      }else{
+        console.log('pushstate:', pageStack[0]);
+        window.history.pushState({ page: pageStack[0] }, '', ''); 
+        // goBack();
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, []);
+
   return (
-    <div className="min-h-screen bg-gray-100 pb-16">
+    <div className="min-h-screen bg-gray-100">
       {renderPage()}
-      <BottomNav activePage={activePage} onPageChange={navigateTo} />
+      <BottomNav activePage={pageStack[0]} onPageChange={navigateTo} />
       {toast && (
         <Toast
           message={toast.message}
@@ -1363,5 +1574,5 @@ export function AppComponent() {
         />
       )}
     </div>
-  )
+  );
 }
