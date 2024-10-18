@@ -9,10 +9,10 @@ import { debounce } from 'lodash'; // 需要安装 lodash 库
 
 // 创建一个 axios 实例
 const api = axios.create({
-  baseURL: '/api'
+  baseURL: `${process.env.NEXT_PUBLIC_API_HOST}/api`
 });
 
-// 添加请求拦截器
+// 为每个API请求自动添加认证token
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
   if (token) {
@@ -561,7 +561,7 @@ const DetailPage = ({ pid, onBack, showToast }: { pid: string, onBack: () => voi
       const token = localStorage.getItem('token');
       if (token) {
         try {
-          await axios.post('/api/user-actions/record', { pid: pid, timestamp: Date.now() }, {
+          await api.post('/user-actions/record', { pid: pid, timestamp: Date.now() }, {
             headers: { Authorization: token }
           });
         } catch (error) {
@@ -575,7 +575,7 @@ const DetailPage = ({ pid, onBack, showToast }: { pid: string, onBack: () => voi
   useEffect(() => {
     const fetchArtifact = async () => {
       try {
-        const response = await axios.get(`/api/artifacts/search?id=${pid}`);
+        const response = await api.get(`/artifacts/search?id=${pid}`);
         const data = response.data;
         setArtifact(data);
         // 记录浏览历史
@@ -1008,7 +1008,7 @@ const IdentifyPage = ({ showToast, setCameraCleanupCallback }: {
         const blob = await fetch(capturedImage).then(r => r.blob());
         formData.append('file', blob, 'image.jpg');
 
-        const response = await fetch('/api/upload', {
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_HOST}/api/upload`, {
           method: 'POST',
           body: formData,
         });
@@ -1248,18 +1248,18 @@ export function AppComponent() {
   useEffect(() => {
     const fetchClassification = async () => {
       try {
-        const response = await axios.get('/api/artifacts/classification')
-        setClassification(response.data)
+        const response = await api.get('/artifacts/classification');
+        setClassification(response.data);
       } catch (error) {
-        console.error('Failed to fetch classification:', error)
+        console.error('Failed to fetch classification:', error);
       }
     }
-    fetchClassification()
-  }, [])
+    fetchClassification();
+  }, []);
 
   const vertifyLoginStatus = async (token: string) => {
     try {
-      const response = await axios.get('/api/users/verify', {
+      const response = await api.get('/users/verify', {
         headers: {
           Authorization: token
         }
@@ -1281,7 +1281,7 @@ export function AppComponent() {
   // 登录
   const handleLogin = async (username: string, password: string) => {
     try {
-      const response = await axios.post('/api/users/login', {
+      const response = await api.post('/users/login', {
         username,
         password
       });
@@ -1542,7 +1542,7 @@ export function AppComponent() {
   // 添加一个 useEffect 来处理浏览器的后退按钮
   useEffect(() => {
     if(window.history.state.page == null){
-      window.history.pushState({ page: 'database' }, '', '');
+      window.history.pushState({ page: pageStack[0] }, '', '');
     }
     const handlePopState = (event: PopStateEvent) => {
       console.log('popstate event:', event);
@@ -1560,7 +1560,7 @@ export function AppComponent() {
     return () => {
       window.removeEventListener('popstate', handlePopState);
     };
-  }, []);
+  }, [pageStack]);
 
   return (
     <div className="min-h-screen bg-gray-100">
